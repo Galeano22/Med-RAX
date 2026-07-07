@@ -93,6 +93,9 @@ class ImageVisualizerTool(BaseTool):
             Dict containing display status and metadata
         """
         try:
+            # Strip stray quotes/space some local models add around path arguments.
+            image_path = image_path.strip().strip("\"'").strip()
+
             # Verify image path
             if not Path(image_path).is_file():
                 raise FileNotFoundError(f"Image file not found: {image_path}")

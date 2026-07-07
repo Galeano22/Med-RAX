@@ -132,6 +132,11 @@ class LlavaMedTool(BaseTool):
             Exception: If there's an error processing the input or generating the answer.
         """
         try:
+            # Local models (e.g. Qwen GGUF) sometimes emit the path argument wrapped
+            # in literal quotes, which breaks Image.open. Strip surrounding quotes/space.
+            if image_path:
+                image_path = image_path.strip().strip("\"'").strip()
+
             input_ids, image_tensor = self._process_input(question, image_path)
             input_ids = input_ids.to(device=self.model.device)
             image_tensor = image_tensor.to(device=self.model.device, dtype=self.model.dtype)

@@ -169,6 +169,9 @@ class ChestXRayReportGeneratorTool(BaseTool):
             Tuple[str, Dict]: A tuple containing the complete report and metadata.
         """
         try:
+            # Strip stray quotes/space some local models add around path arguments.
+            image_path = image_path.strip().strip("\"'").strip()
+
             # Process image for both models
             findings_pixels = self._process_image(
                 image_path, self.findings_processor, self.findings_model

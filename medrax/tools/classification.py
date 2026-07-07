@@ -109,6 +109,8 @@ class ChestXRayClassifierTool(BaseTool):
             Exception: If there's an error processing the image or during classification.
         """
         try:
+            # Strip stray quotes/space some local models add around path arguments.
+            image_path = image_path.strip().strip("\"'").strip()
             img = self._process_image(image_path)
 
             with torch.inference_mode():

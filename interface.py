@@ -1,5 +1,6 @@
 import re
 import base64
+import numpy as np
 import gradio as gr
 from pathlib import Path
 import time
@@ -108,28 +109,31 @@ class ChatInterface:
         messages = []
         image_path = self.original_file_path or display_image
 
+        # Build a single user message. Gemma/MedGemma templates require strictly
+        # alternating user/assistant roles, so the path, image, and text must be
+        # combined into one multimodal message rather than several user turns.
+        content = []
+
         if image_path is not None:
             # Send path for tools
-            messages.append({"role": "user", "content": f"image_path: {image_path}"})
+            content.append({"type": "text", "text": f"image_path: {image_path}"})
 
             # Load and encode image for multimodal
             with open(image_path, "rb") as img_file:
                 img_base64 = base64.b64encode(img_file.read()).decode("utf-8")
 
-            messages.append(
+            content.append(
                 {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"},
-                        }
-                    ],
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"},
                 }
             )
 
         if message is not None:
-            messages.append({"role": "user", "content": [{"type": "text", "text": message}]})
+            content.append({"type": "text", "text": message})
+
+        if content:
+            messages.append({"role": "user", "content": content})
 
         try:
             for event in self.agent.workflow.stream(
@@ -146,7 +150,7 @@ class ChatInterface:
                     elif "execute" in event:
                         for message in event["execute"]["messages"]:
                             tool_name = message.name
-                            tool_result = eval(message.content)[0]
+                            tool_result = eval(message.content, {"np": np, "array": np.array})[0]
 
                             if tool_result:
                                 metadata = {"title": f"🖼️ Image from tool: {tool_name}"}
@@ -181,7 +185,7 @@ class ChatInterface:
                     role="assistant", content=f"❌ Error: {str(e)}", metadata={"title": "Error"}
                 )
             )
-            yield chat_history, self.display_file_path
+            yield chat_history, self.display_file_path, ""
 
 
 def create_demo(agent, tools_dict):
@@ -214,7 +218,6 @@ def create_demo(agent, tools_dict):
                         container=True,
                         show_label=True,
                         elem_classes="chat-box",
-                        type="messages",
                         label="Agent",
                         avatar_images=(
                             None,

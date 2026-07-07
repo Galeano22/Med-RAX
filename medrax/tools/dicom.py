@@ -58,16 +58,27 @@ class DicomProcessorTool(BaseTool):
         dcm = pydicom.dcmread(dicom_path)
         img = dcm.pixel_array.astype(float)
 
+        def _scalar(value):
+            """Coerce a DICOM value to a single float.
+
+            WindowCenter/WindowWidth are frequently multi-valued; pydicom returns
+            a MultiValue (NOT a `list`), so a plain isinstance(x, list) check
+            misses them and later arithmetic (e.g. width // 2) raises
+            "unsupported operand type(s) for //: 'MultiValue' and 'int'".
+            Take the first entry and cast to float.
+            """
+            if isinstance(value, str):
+                return float(value)
+            if hasattr(value, "__iter__"):
+                value = value[0]
+            return float(value)
+
         # Apply manufacturer's recommended windowing if available and not overridden
         if window_center is None and hasattr(dcm, "WindowCenter"):
-            window_center = dcm.WindowCenter
-            if isinstance(window_center, list):
-                window_center = window_center[0]
+            window_center = _scalar(dcm.WindowCenter)
 
         if window_width is None and hasattr(dcm, "WindowWidth"):
-            window_width = dcm.WindowWidth
-            if isinstance(window_width, list):
-                window_width = window_width[0]
+            window_width = _scalar(dcm.WindowWidth)
 
         # Apply rescale slope/intercept if available
         if hasattr(dcm, "RescaleSlope") and hasattr(dcm, "RescaleIntercept"):
@@ -112,6 +123,9 @@ class DicomProcessorTool(BaseTool):
             Tuple[Dict, Dict]: Output dictionary with processed image path and metadata dictionary
         """
         try:
+            # Strip stray quotes/space some local models add around path arguments.
+            dicom_path = dicom_path.strip().strip("\"'").strip()
+
             # Process DICOM and save as PNG
             img_array, metadata = self._process_dicom(dicom_path, window_center, window_width)
             output_path = self.temp_dir / f"processed_dicom_{uuid.uuid4().hex[:8]}.png"

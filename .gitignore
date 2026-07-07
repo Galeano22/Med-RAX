@@ -172,3 +172,13 @@ logs/
 temp/
 
 .gradio/
+
+# Large model weights / downloaded content (never commit — 60GB+)
+downloadable_content/
+
+# Sample DICOM / rendered image binaries
+CR.dcm
+CR.png
+DOC.dcm
+*.dcm
+doc_extracted.pdf

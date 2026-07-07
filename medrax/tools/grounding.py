@@ -150,6 +150,9 @@ class XRayPhraseGroundingTool(BaseTool):
             Tuple[Dict, Dict]: Output dictionary and metadata dictionary
         """
         try:
+            # Strip stray quotes/space some local models add around path arguments.
+            image_path = image_path.strip().strip("\"'").strip()
+
             image = Image.open(image_path)
             if image.mode != "RGB":
                 image = image.convert("RGB")

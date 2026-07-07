@@ -230,6 +230,9 @@ class ChestXRaySegmentationTool(BaseTool):
     ) -> Tuple[Dict[str, Any], Dict]:
         """Run segmentation analysis for specified organs."""
         try:
+            # Strip stray quotes/space some local models add around path arguments.
+            image_path = image_path.strip().strip("\"'").strip()
+
             # Validate and get organ indices
             if organs:
                 organs = [o.strip() for o in organs]

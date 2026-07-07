@@ -20,12 +20,13 @@ _ = load_dotenv()
 def initialize_agent(
     prompt_file,
     tools_to_use=None,
-    model_dir="/model-weights",
-    temp_dir="temp",
+    model_dir="/mnt/dados2/MedRAX/downloadable_content/model_weights",
+    temp_dir="/mnt/dados2/MedRAX/downloadable_content/temp",
     device="cuda",
     model="chatgpt-4o-latest",
     temperature=0.7,
     top_p=0.95,
+    prompt_key="MEDICAL_ASSISTANT",
     openai_kwargs={}
 ):
     """Initialize the MedRAX agent with specified tools and configuration.
@@ -39,17 +40,19 @@ def initialize_agent(
         model (str, optional): Model to use. Defaults to "chatgpt-4o-latest".
         temperature (float, optional): Temperature for the model. Defaults to 0.7.
         top_p (float, optional): Top P for the model. Defaults to 0.95.
+        prompt_key (str, optional): Which system prompt section to load. Defaults to "MEDICAL_ASSISTANT".
         openai_kwargs (dict, optional): Additional keyword arguments for OpenAI API, such as API key and base URL.
 
     Returns:
         Tuple[Agent, Dict[str, BaseTool]]: Initialized agent and dictionary of tool instances
     """
     prompts = load_prompts_from_file(prompt_file)
-    prompt = prompts["MEDICAL_ASSISTANT"]
+    prompt = prompts[prompt_key]
 
     all_tools = {
         "ChestXRayClassifierTool": lambda: ChestXRayClassifierTool(device=device),
         "ChestXRaySegmentationTool": lambda: ChestXRaySegmentationTool(device=device),
+        "CardiothoracicRatioTool": lambda: CardiothoracicRatioTool(device=device, temp_dir=temp_dir),
         "LlavaMedTool": lambda: LlavaMedTool(cache_dir=model_dir, device=device, load_in_8bit=True),
         "XRayVQATool": lambda: XRayVQATool(cache_dir=model_dir, device=device),
         "ChestXRayReportGeneratorTool": lambda: ChestXRayReportGeneratorTool(
@@ -63,6 +66,24 @@ def initialize_agent(
         ),
         "ImageVisualizerTool": lambda: ImageVisualizerTool(),
         "DicomProcessorTool": lambda: DicomProcessorTool(temp_dir=temp_dir),
+        "MedRAXDicomWebTool": lambda: MedRAXDicomWebTool(
+            base_url=os.getenv("DICOMWEB_URL", "http://localhost:8042/dicom-web"),
+            username=os.getenv("DICOMWEB_USERNAME"),
+            password=os.getenv("DICOMWEB_PASSWORD"),
+            temp_dir=temp_dir,
+        ),
+        "MedRAXReportToPacsTool": lambda: MedRAXReportToPacsTool(
+            base_url=os.getenv("DICOMWEB_URL", "http://localhost:8042/dicom-web"),
+            username=os.getenv("DICOMWEB_USERNAME"),
+            password=os.getenv("DICOMWEB_PASSWORD"),
+        ),
+        "MedGemmaTool": lambda: MedGemmaTool(
+            model=os.getenv("MEDGEMMA_MODEL"),
+            base_url=os.getenv("MEDGEMMA_BASE_URL"),
+            api_key=os.getenv("MEDGEMMA_API_KEY"),
+        ),
+        "WebSearchTool": lambda: WebSearchTool(),
+        "PythonSandboxTool": lambda: PythonSandboxTool(temp_dir=temp_dir),
     }
 
     # Initialize only selected tools or all if none specified
@@ -72,8 +93,25 @@ def initialize_agent(
         if tool_name in all_tools:
             tools_dict[tool_name] = all_tools[tool_name]()
 
+    # Inject the classifier into the CTR tool for an independent Cardiomegaly cross-check,
+    # reusing the already-loaded model instead of loading a second copy onto the GPU.
+    if "CardiothoracicRatioTool" in tools_dict and "ChestXRayClassifierTool" in tools_dict:
+        tools_dict["CardiothoracicRatioTool"].classifier = tools_dict["ChestXRayClassifierTool"]
+
     checkpointer = MemorySaver()
-    model = ChatOpenAI(model=model, temperature=temperature, top_p=top_p, **openai_kwargs)
+    # A finite timeout + bounded retries so a stalled LLM call fails cleanly instead
+    # of hanging forever (an indefinite hang holds the API's global agent lock and
+    # blocks every other session). Override via MEDRAX_LLM_TIMEOUT / MEDRAX_LLM_RETRIES.
+    llm_timeout = float(os.getenv("MEDRAX_LLM_TIMEOUT", "300"))
+    llm_retries = int(os.getenv("MEDRAX_LLM_RETRIES", "2"))
+    model = ChatOpenAI(
+        model=model,
+        temperature=temperature,
+        top_p=top_p,
+        timeout=llm_timeout,
+        max_retries=llm_retries,
+        **openai_kwargs,
+    )
     agent = Agent(
         model,
         tools=list(tools_dict.values()),
@@ -81,6 +119,7 @@ def initialize_agent(
         log_dir="logs",
         system_prompt=prompt,
         checkpointer=checkpointer,
+        max_context_tokens=int(os.getenv("MEDRAX_MAX_CONTEXT_TOKENS", "65536")),
     )
 
     print("Agent initialized")
@@ -99,12 +138,18 @@ if __name__ == "__main__":
     selected_tools = [
         "ImageVisualizerTool",
         "DicomProcessorTool",
+        "MedRAXDicomWebTool",
+        "MedRAXReportToPacsTool",
         "ChestXRayClassifierTool",
         "ChestXRaySegmentationTool",
+        "CardiothoracicRatioTool",
         "ChestXRayReportGeneratorTool",
         "XRayVQATool",
-        # "LlavaMedTool",
-        # "XRayPhraseGroundingTool",
+        "LlavaMedTool",
+        "XRayPhraseGroundingTool",
+        "WebSearchTool",
+        "PythonSandboxTool",
+        # "MedGemmaTool",          # disabled: no spare GPU memory for it
         # "ChestXRayGeneratorTool",
     ]
 
@@ -119,12 +164,13 @@ if __name__ == "__main__":
     agent, tools_dict = initialize_agent(
         "medrax/docs/system_prompts.txt",
         tools_to_use=selected_tools,
-        model_dir="/model-weights",  # Change this to the path of the model weights
+        model_dir="/mnt/dados2/MedRAX/downloadable_content/model_weights",
         temp_dir="temp",  # Change this to the path of the temporary directory
         device="cuda",  # Change this to the device you want to use
-        model="gpt-4o",  # Change this to the model you want to use, e.g. gpt-4o-mini
+        model="Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
         temperature=0.7,
         top_p=0.95,
+        prompt_key="MEDICAL_ASSISTANT",
         openai_kwargs=openai_kwargs
     )
     demo = create_demo(agent, tools_dict)

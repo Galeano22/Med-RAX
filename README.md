@@ -27,6 +27,8 @@ MedRAX is built on a robust technical foundation:
 - **Report Generation**: Implements SwinV2 Transformer trained on CheXpert Plus for detailed medical reporting
 - **Disease Classification**: Leverages DenseNet-121 from TorchXRayVision for detecting 18 pathology classes
 - **X-ray Generation**: Utilizes RoentGen for synthetic CXR generation
+- **PACS / DICOMweb Access**: Queries and retrieves studies from any DICOMweb server (Orthanc, dcm4chee, Google Healthcare, …), and can export a whole cohort — with patient demographics — to CSV for statistical analysis
+- **Sandboxed Compute**: Runs Python (numpy/pandas/scipy/matplotlib) in a locked-down, network-isolated container for deterministic calculations, cohort statistics, and chart generation
 - **Utilities**: Includes DICOM processing, visualization tools, and custom plotting capabilities
 <br><br>
 
@@ -93,6 +95,30 @@ sudo -E env "PATH=$PATH" python main.py
 You need to setup the `model_dir` inside `main.py` to the directory where you want to download or already have the weights of above tools from Hugging Face.
 Comment out the tools that you do not have access to.
 Make sure to setup your OpenAI API key in `.env` file!
+<br><br><br>
+
+
+## Example Prompts
+
+Once the agent is running (connected to your DICOMweb/Orthanc server via the `DICOMWEB_*` variables in `.env`), you can ask it in plain language.
+
+**Analyze a patient's exam**
+- "Pull the most recent chest X-ray for patient DOE^JOHN and tell me if there's cardiomegaly."
+- "Retrieve accession 1234567, run the classifier and report generator, and summarize the findings."
+- "Compare this patient's last two exams — has the cardiothoracic ratio changed? Plot it."
+
+**Cohort statistics over the archive (PACS + sandbox)**
+
+These questions are answered by exporting a cohort from PACS (`MedRax-Dicomweb` `action='export_dataset'`) and aggregating it in the locked-down `python_sandbox` — no data leaves the isolated container.
+
+- "How many exams does patient with ID 54.005046 have?"
+- "How many patients in the archive are female vs male?"
+- "How many CT versus CR exams were done in May 2024?" *(filters by `start_date`/`end_date`)*
+- "What is the age distribution of patients who had a chest X-ray this year? Show a histogram."
+- "Break down the studies by modality and give me a bar chart."
+- "Which patients have more than 3 exams on record?"
+
+The agent exports the studies (with `patient_sex`, `patient_age`, `modality`, `study_date`, …) to a CSV, then runs pandas in the sandbox to count, group, and plot. Charts come back as image artifacts you can view or embed in a PACS report.
 <br><br><br>
 
 

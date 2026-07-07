@@ -87,6 +87,18 @@ class XRayVQATool(BaseTool):
         self.model = self.model.to(dtype=self.dtype)
         self.model.eval()
 
+        # CheXagent's custom modeling code encodes the image only when
+        # `past_key_values is None` on the first forward pass (modeling_chexagent.py).
+        # transformers >=4.44 pre-initializes a Cache object before the first forward,
+        # so that gate never fires and the model silently ignores the image (identical
+        # output for every image). Forcing the legacy cache path restores `None` on the
+        # first forward so the image-encoding branch runs. CheXagent targets transformers
+        # ~4.39-4.40; this keeps it working on newer installs without a downgrade.
+        self.model._supports_cache_class = False
+        for _attr in ("_supports_static_cache", "_supports_quantized_cache"):
+            if hasattr(self.model, _attr):
+                setattr(self.model, _attr, False)
+
         transformers.__version__ = original_transformers_version
 
     def _generate_response(self, image_paths: List[str], prompt: str, max_new_tokens: int) -> str:
@@ -144,6 +156,9 @@ class XRayVQATool(BaseTool):
             Tuple[Dict[str, Any], Dict]: Output dictionary and metadata dictionary
         """
         try:
+            # Strip stray quotes/space some local models add around path arguments.
+            image_paths = [p.strip().strip("\"'").strip() for p in image_paths]
+
             # Verify image paths
             for path in image_paths:
                 if not Path(path).is_file():
